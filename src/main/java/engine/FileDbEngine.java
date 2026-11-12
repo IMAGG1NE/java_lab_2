@@ -5,12 +5,11 @@ import model.DataType;
 
 import java.io.*;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class FileDbEngine implements Db_Engine {
+public class FileDbEngine implements DbEngine {
 
     private static final String DATA_DIR = "data";
     private static final String DELIMITER = "|";
@@ -25,39 +24,46 @@ public class FileDbEngine implements Db_Engine {
         loadAllTablesFromDisk();
     }
 
-
     @Override
-    public void createTable(String tableName, Map<String, DataType> schema) {
-        if (tables.containsKey(tableName)) {
-            throw new RuntimeException("Ошибка: Таблица '" + tableName + "' уже существует.");
+    public void createTable(String table_name, List<String> columns) {
+        if (tables.containsKey(table_name)) {
+            throw new RuntimeException("Ошибка: Таблица '" + table_name + "' уже существует.");
         }
 
-        Table newTable = new Table(tableName, schema);
-        tables.put(tableName, newTable);
+        Map<String, DataType> schema = new LinkedHashMap<>();
+        for (String col : columns) {
+            String[] parts = col.split(":");
+            if (parts.length != 2) {
+                throw new RuntimeException("Ошибка: Неверный формат колонки '" + col + "'. Ожидалось 'имя:ТИП'");
+            }
+            String colName = parts[0].trim();
+            DataType type = DataType.valueOf(parts[1].trim().toUpperCase());
+            schema.put(colName, type);
+        }
+
+        Table newTable = new Table(table_name, schema);
+        tables.put(table_name, newTable);
         saveTableToDisk(newTable);
     }
 
     @Override
-    public void dropTable(String tableName) {
-        checkTableExists(tableName);
-
-        new File(DATA_DIR + "/" + tableName + ".schema").delete();
-        new File(DATA_DIR + "/" + tableName + ".data").delete();
-
-        tables.remove(tableName);
+    public void dropTable(String table_name) {
+        checkTableExists(table_name);
+        new File(DATA_DIR + "/" + table_name + ".schema").delete();
+        new File(DATA_DIR + "/" + table_name + ".data").delete();
+        tables.remove(table_name);
     }
 
-
     @Override
-    public void insert(String tableName, Map<String, Object> row) {
-        Table table = checkTableExists(tableName);
+    public void insert(String table_name, Map<String, Object> vals) {
+        Table table = checkTableExists(table_name);
 
-        for (Map.Entry<String, Object> entry : row.entrySet()) {
+        for (Map.Entry<String, Object> entry : vals.entrySet()) {
             String colName = entry.getKey();
             Object value = entry.getValue();
 
             if (!table.schema.containsKey(colName)) {
-                throw new RuntimeException("Ошибка: Колонка '" + colName + "' не найдена в таблице " + tableName);
+                throw new RuntimeException("Ошибка: Колонка '" + colName + "' не найдена в таблице " + table_name);
             }
 
             if (!isTypeMatching(value, table.schema.get(colName))) {
@@ -65,26 +71,27 @@ public class FileDbEngine implements Db_Engine {
             }
         }
 
-        table.rows.add(new HashMap<>(row));
-
+        table.rows.add(new HashMap<>(vals));
         rebuildIndexes(table);
         saveTableToDisk(table);
     }
 
     @Override
-    public List<Map<String, Object>> select(String tableName, List<String> columns, Condition condition) {
-        Table table = checkTableExists(tableName);
+    public List<Map<String, Object>> select(String table_name, List<String> columns, Condition cond) {
+        Table table = checkTableExists(table_name);
 
-        List<Map<String, Object>> matchedRows = getRowsByCondition(table, condition);
+        List<Map<String, Object>> matchedRows = getRowsByCondition(table, cond);
 
         List<Map<String, Object>> result = new ArrayList<>();
         boolean selectAll = columns.contains("*");
 
-        for (Map<String, Object> row : matchedRows) {
-            if (selectAll) {
+        if (selectAll) {
+            for (Map<String, Object> row : matchedRows) {
                 result.add(new HashMap<>(row));
-            } else {
-                Map<String, Object> projectedRow = new HashMap<>();
+            }
+        } else {
+            for (Map<String, Object> row : matchedRows) {
+                Map<String, Object> projectedRow = new LinkedHashMap<>();
                 for (String col : columns) {
                     if (!table.schema.containsKey(col)) {
                         throw new RuntimeException("Ошибка: Колонка '" + col + "' не найдена");
@@ -98,13 +105,13 @@ public class FileDbEngine implements Db_Engine {
     }
 
     @Override
-    public int update(String tableName, Map<String, Object> newValues, Condition condition) {
-        Table table = checkTableExists(tableName);
-        List<Map<String, Object>> matchedRows = getRowsByCondition(table, condition);
+    public int update(String table_name, Map<String, Object> vals, Condition cond) {
+        Table table = checkTableExists(table_name);
+        List<Map<String, Object>> matchedRows = getRowsByCondition(table, cond);
 
         int count = 0;
         for (Map<String, Object> row : matchedRows) {
-            for (Map.Entry<String, Object> entry : newValues.entrySet()) {
+            for (Map.Entry<String, Object> entry : vals.entrySet()) {
                 if (!table.schema.containsKey(entry.getKey())) {
                     throw new RuntimeException("Ошибка: Колонка '" + entry.getKey() + "' не найдена");
                 }
@@ -121,9 +128,9 @@ public class FileDbEngine implements Db_Engine {
     }
 
     @Override
-    public int delete(String tableName, Condition condition) {
-        Table table = checkTableExists(tableName);
-        List<Map<String, Object>> matchedRows = getRowsByCondition(table, condition);
+    public int delete(String table_name, Condition cond) {
+        Table table = checkTableExists(table_name);
+        List<Map<String, Object>> matchedRows = getRowsByCondition(table, cond);
 
         table.rows.removeAll(matchedRows);
         int count = matchedRows.size();
@@ -136,56 +143,56 @@ public class FileDbEngine implements Db_Engine {
     }
 
     @Override
-    public void createIndex(String tableName, String columnName) {
-        Table table = checkTableExists(tableName);
-        if (!table.schema.containsKey(columnName)) {
-            throw new RuntimeException("Ошибка: Колонка '" + columnName + "' не найдена");
+    public void createIndex(String table_name, String column_name) {
+        Table table = checkTableExists(table_name);
+        if (!table.schema.containsKey(column_name)) {
+            throw new RuntimeException("Ошибка: Колонка '" + column_name + "' не найдена");
         }
 
         TreeMap<Object, List<Integer>> index = new TreeMap<>();
 
         for (int i = 0; i < table.rows.size(); i++) {
-            Object val = table.rows.get(i).get(columnName);
+            Object val = table.rows.get(i).get(column_name);
             if (val != null) {
                 index.computeIfAbsent(val, k -> new ArrayList<>()).add(i);
             }
         }
 
-        table.indexes.put(columnName, index);
+        table.indexes.put(column_name, index);
     }
 
-
-    private List<Map<String, Object>> getRowsByCondition(Table table, Condition condition) {
-        if (condition == null) {
-            return new ArrayList<>(table.rows); // Возвращаем всё
+    private List<Map<String, Object>> getRowsByCondition(Table table, Condition cond) {
+        if (cond == null) {
+            return new ArrayList<>(table.rows);
         }
 
-        String col = condition.col;
+        String col = cond.col;
 
         if (table.indexes.containsKey(col)) {
             TreeMap<Object, List<Integer>> idx = table.indexes.get(col);
             List<Integer> rowIds = new ArrayList<>();
+            Object condValue = cond.val;
 
-            switch (condition.operator) {
+            switch (cond.operator) {
                 case "=":
-                    if (idx.containsKey(condition.val)) {
-                        rowIds.addAll(idx.get(condition.val));
+                    if (idx.containsKey(condValue)) {
+                        rowIds.addAll(idx.get(condValue));
                     }
                     break;
                 case ">":
-                    rowIds.addAll(getIdsFromSubMap(idx.tailMap(condition.val, false)));
+                    rowIds.addAll(getIdsFromSubMap(idx.tailMap(condValue, false)));
                     break;
                 case "<":
-                    rowIds.addAll(getIdsFromSubMap(idx.headMap(condition.val, false)));
+                    rowIds.addAll(getIdsFromSubMap(idx.headMap(condValue, false)));
                     break;
                 case ">=":
-                    rowIds.addAll(getIdsFromSubMap(idx.tailMap(condition.val, true)));
+                    rowIds.addAll(getIdsFromSubMap(idx.tailMap(condValue, true)));
                     break;
                 case "<=":
-                    rowIds.addAll(getIdsFromSubMap(idx.headMap(condition.val, true)));
+                    rowIds.addAll(getIdsFromSubMap(idx.headMap(condValue, true)));
                     break;
                 default:
-                    return fullScan(table.rows, condition);
+                    return fullScan(table.rows, cond);
             }
 
             List<Map<String, Object>> result = new ArrayList<>();
@@ -195,7 +202,7 @@ public class FileDbEngine implements Db_Engine {
             return result;
         }
 
-        return fullScan(table.rows, condition);
+        return fullScan(table.rows, cond);
     }
 
     private List<Integer> getIdsFromSubMap(NavigableMap<Object, List<Integer>> subMap) {
@@ -206,28 +213,28 @@ public class FileDbEngine implements Db_Engine {
         return ids;
     }
 
-    private List<Map<String, Object>> fullScan(List<Map<String, Object>> rows, Condition condition) {
+    private List<Map<String, Object>> fullScan(List<Map<String, Object>> rows, Condition cond) {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : rows) {
-            Object rowVal = row.get(condition.col);
-            if (evaluateCondition(rowVal, condition)) {
+            Object rowVal = row.get(cond.col);
+            if (evaluateCondition(rowVal, cond)) {
                 result.add(row);
             }
         }
         return result;
     }
 
-    private boolean evaluateCondition(Object rowVal, Condition condition) {
-        if (rowVal == null || condition.val == null) return false;
+    private boolean evaluateCondition(Object rowVal, Condition cond) {
+        if (rowVal == null || cond.val == null) return false;
 
-        if (rowVal instanceof Comparable && condition.val instanceof Comparable) {
+        if (rowVal instanceof Comparable && cond.val instanceof Comparable) {
             Comparable c1 = (Comparable) rowVal;
-            Comparable c2 = (Comparable) condition.val;
+            Comparable c2 = (Comparable) cond.val;
 
             if (!c1.getClass().equals(c2.getClass())) return false;
 
             int cmp = c1.compareTo(c2);
-            switch (condition.operator) {
+            switch (cond.operator) {
                 case "=": return cmp == 0;
                 case "!=": return cmp != 0;
                 case ">": return cmp > 0;
@@ -257,11 +264,11 @@ public class FileDbEngine implements Db_Engine {
         }
     }
 
-    private Table checkTableExists(String tableName) {
-        if (!tables.containsKey(tableName)) {
-            throw new RuntimeException("Ошибка: Таблица '" + tableName + "' не найдена.");
+    private Table checkTableExists(String table_name) {
+        if (!tables.containsKey(table_name)) {
+            throw new RuntimeException("Ошибка: Таблица '" + table_name + "' не найдена.");
         }
-        return tables.get(tableName);
+        return tables.get(table_name);
     }
 
     private void saveTableToDisk(Table table) {
@@ -346,7 +353,6 @@ public class FileDbEngine implements Db_Engine {
             default: return val;
         }
     }
-
 
     private static class Table {
         String name;
