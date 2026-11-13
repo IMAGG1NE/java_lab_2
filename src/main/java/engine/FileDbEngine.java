@@ -25,25 +25,20 @@ public class FileDbEngine implements DbEngine {
     }
 
     @Override
-    public void createTable(String table_name, List<String> columns) {
+    public void createTable(String table_name, Map<String, DataType> columns) {
         if (tables.containsKey(table_name)) {
             throw new RuntimeException("Ошибка: Таблица '" + table_name + "' уже существует.");
         }
 
-        Map<String, DataType> schema = new LinkedHashMap<>();
-        for (String col : columns) {
-            String[] parts = col.split(":");
-            if (parts.length != 2) {
-                throw new RuntimeException("Ошибка: Неверный формат колонки '" + col + "'. Ожидалось 'имя:ТИП'");
-            }
-            String colName = parts[0].trim();
-            DataType type = DataType.valueOf(parts[1].trim().toUpperCase());
-            schema.put(colName, type);
-        }
-
-        Table newTable = new Table(table_name, schema);
+        Table newTable = new Table(table_name, new LinkedHashMap<>(columns));
         tables.put(table_name, newTable);
         saveTableToDisk(newTable);
+    }
+
+    @Override
+    public List<String> getColumnNames(String table_name) {
+        Table table = checkTableExists(table_name);
+        return new ArrayList<>(table.schema.keySet());
     }
 
     @Override
@@ -68,6 +63,22 @@ public class FileDbEngine implements DbEngine {
 
             if (!isTypeMatching(value, table.schema.get(colName))) {
                 throw new RuntimeException("Ошибка: Неверный тип данных для колонки '" + colName + "'");
+            }
+
+            if (table.schema.get(colName) == DataType.DOUBLE && value instanceof Integer) {
+                entry.setValue(((Integer) value).doubleValue());
+            }
+        }
+
+        if (!table.schema.isEmpty()) {
+            String pkCol = table.schema.keySet().iterator().next();
+            Object pkVal = vals.get(pkCol);
+            if (pkVal != null) {
+                for (Map<String, Object> row : table.rows) {
+                    if (pkVal.equals(row.get(pkCol))) {
+                        throw new RuntimeException("Ошибка: Дубликат первичного ключа '" + pkCol + "' = " + pkVal);
+                    }
+                }
             }
         }
 
@@ -112,10 +123,18 @@ public class FileDbEngine implements DbEngine {
         int count = 0;
         for (Map<String, Object> row : matchedRows) {
             for (Map.Entry<String, Object> entry : vals.entrySet()) {
-                if (!table.schema.containsKey(entry.getKey())) {
-                    throw new RuntimeException("Ошибка: Колонка '" + entry.getKey() + "' не найдена");
+                String colName = entry.getKey();
+                Object value = entry.getValue();
+                if (!table.schema.containsKey(colName)) {
+                    throw new RuntimeException("Ошибка: Колонка '" + colName + "' не найдена");
                 }
-                row.put(entry.getKey(), entry.getValue());
+                if (!isTypeMatching(value, table.schema.get(colName))) {
+                    throw new RuntimeException("Ошибка: Неверный тип данных для колонки '" + colName + "'");
+                }
+                if (table.schema.get(colName) == DataType.DOUBLE && value instanceof Integer) {
+                    value = ((Integer) value).doubleValue();
+                }
+                row.put(colName, value);
             }
             count++;
         }
@@ -167,11 +186,17 @@ public class FileDbEngine implements DbEngine {
         }
 
         String col = cond.col;
+        if (!table.schema.containsKey(col)) {
+            throw new RuntimeException("Ошибка: Колонка '" + col + "' не найдена");
+        }
 
         if (table.indexes.containsKey(col)) {
             TreeMap<Object, List<Integer>> idx = table.indexes.get(col);
             List<Integer> rowIds = new ArrayList<>();
             Object condValue = cond.val;
+            if (table.schema.get(col) == DataType.DOUBLE && condValue instanceof Integer) {
+                condValue = ((Integer) condValue).doubleValue();
+            }
 
             switch (cond.operator) {
                 case "=":
@@ -227,6 +252,19 @@ public class FileDbEngine implements DbEngine {
     private boolean evaluateCondition(Object rowVal, Condition cond) {
         if (rowVal == null || cond.val == null) return false;
 
+        if (rowVal instanceof Number && cond.val instanceof Number) {
+            int cmp = Double.compare(((Number) rowVal).doubleValue(), ((Number) cond.val).doubleValue());
+            switch (cond.operator) {
+                case "=": return cmp == 0;
+                case "!=": return cmp != 0;
+                case ">": return cmp > 0;
+                case "<": return cmp < 0;
+                case ">=": return cmp >= 0;
+                case "<=": return cmp <= 0;
+            }
+            return false;
+        }
+
         if (rowVal instanceof Comparable && cond.val instanceof Comparable) {
             Comparable c1 = (Comparable) rowVal;
             Comparable c2 = (Comparable) cond.val;
@@ -256,7 +294,7 @@ public class FileDbEngine implements DbEngine {
         if (value == null) return true;
         switch (type) {
             case INT: return value instanceof Integer;
-            case DOUBLE: return value instanceof Double;
+            case DOUBLE: return value instanceof Double || value instanceof Integer;
             case STRING: return value instanceof String;
             case BOOL: return value instanceof Boolean;
             case DATE: return value instanceof String;
