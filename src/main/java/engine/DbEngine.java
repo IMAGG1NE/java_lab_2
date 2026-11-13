@@ -1,6 +1,7 @@
 package engine;
 
 import model.Condition;
+import model.DataType;
 import java.util.List;
 import java.util.Map;
 
@@ -10,7 +11,8 @@ public interface DbEngine {
     int delete(String table_name, Condition cond);
     List<Map<String, Object>> select(String table_name, List<String> columns, Condition cond);
 
-    void createTable(String table_name, List<String> columns);
-    void dropTable(String table_name);
-    void createIndex(String table_name, String column_name);
+    void createTable(String tableName, Map<String, DataType> columns);
+    void dropTable(String tableName);
+    void createIndex(String tableName, String columnName);
+    List<String> getColumnNames(String tableName);
 }
