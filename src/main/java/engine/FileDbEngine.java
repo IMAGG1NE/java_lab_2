@@ -9,6 +9,12 @@ import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Реализация ядра системы управления базами данных.
+ * Обеспечивает хранение таблиц на диске (в файлах .schema и .data),
+ * строгую проверку типов данных, контроль уникальности первичного ключа
+ * и поддержку B-Tree индексов для оптимизации поисковых запросов.
+ */
 public class FileDbEngine implements DbEngine {
 
     private static final String DATA_DIR = "data";
@@ -16,6 +22,11 @@ public class FileDbEngine implements DbEngine {
 
     private final Map<String, Table> tables = new HashMap<>();
 
+    /**
+     * Конструктор движка СУБД.
+     * Создает директорию для хранения данных (если она не существует)
+     * и автоматически загружает все существующие таблицы с диска в оперативную память.
+     */
     public FileDbEngine() {
         File dir = new File(DATA_DIR);
         if (!dir.exists()) {
@@ -24,6 +35,13 @@ public class FileDbEngine implements DbEngine {
         loadAllTablesFromDisk();
     }
 
+    /**
+     * Создает новую таблицу с заданной схемой и сохраняет её на диск.
+     *
+     * @param table_name название создаваемой таблицы
+     * @param columns    карта, описывающая схему таблицы (имя колонки -> тип данных)
+     * @throws RuntimeException если таблица с таким именем уже существует
+     */
     @Override
     public void createTable(String table_name, Map<String, DataType> columns) {
         if (tables.containsKey(table_name)) {
@@ -35,12 +53,25 @@ public class FileDbEngine implements DbEngine {
         saveTableToDisk(newTable);
     }
 
+    /**
+     * Возвращает список названий всех колонок указанной таблицы.
+     *
+     * @param table_name название таблицы
+     * @return список имен колонок в порядке их объявления в схеме
+     * @throws RuntimeException если таблица не найдена
+     */
     @Override
     public List<String> getColumnNames(String table_name) {
         Table table = checkTableExists(table_name);
         return new ArrayList<>(table.schema.keySet());
     }
 
+    /**
+     * Полностью удаляет таблицу из оперативной памяти, а также стирает её файлы (.schema и .data) с диска.
+     *
+     * @param table_name название удаляемой таблицы
+     * @throws RuntimeException если таблица не найдена
+     */
     @Override
     public void dropTable(String table_name) {
         checkTableExists(table_name);
@@ -49,6 +80,15 @@ public class FileDbEngine implements DbEngine {
         tables.remove(table_name);
     }
 
+    /**
+     * Вставляет новую запись (строку) в указанную таблицу.
+     * Проверяет существование колонок, соответствие типов данных и уникальность первичного ключа (первой колонки).
+     * После вставки перестраивает индексы и сохраняет изменения на диск.
+     *
+     * @param table_name название целевой таблицы
+     * @param vals       карта значений для вставки (имя колонки -> значение)
+     * @throws RuntimeException если колонка не найдена, тип данных некорректен или нарушена уникальность первичного ключа
+     */
     @Override
     public void insert(String table_name, Map<String, Object> vals) {
         Table table = checkTableExists(table_name);
@@ -87,6 +127,15 @@ public class FileDbEngine implements DbEngine {
         saveTableToDisk(table);
     }
 
+    /**
+     * Выполняет выборку данных из таблицы с возможностью проекции колонок и фильтрации по условию.
+     *
+     * @param table_name название таблицы
+     * @param columns    список запрашиваемых колонок (или "*" для выбора всех колонок)
+     * @param cond       условие фильтрации WHERE (может быть null, если фильтрация не требуется)
+     * @return список строк, удовлетворяющих условию
+     * @throws RuntimeException если таблица или одна из запрашиваемых колонок не найдены
+     */
     @Override
     public List<Map<String, Object>> select(String table_name, List<String> columns, Condition cond) {
         Table table = checkTableExists(table_name);
@@ -115,6 +164,16 @@ public class FileDbEngine implements DbEngine {
         return result;
     }
 
+    /**
+     * Обновляет значения в строках, удовлетворяющих заданному условию.
+     * При наличии изменений перестраивает индексы и перезаписывает файл данных на диске.
+     *
+     * @param table_name название таблицы
+     * @param vals       карта новых значений (имя колонки -> новое значение)
+     * @param cond       условие отбора строк для обновления (может быть null для обновления всех строк)
+     * @return количество обновленных записей
+     * @throws RuntimeException если таблица/колонка не найдены или передан неверный тип данных
+     */
     @Override
     public int update(String table_name, Map<String, Object> vals, Condition cond) {
         Table table = checkTableExists(table_name);
@@ -146,6 +205,15 @@ public class FileDbEngine implements DbEngine {
         return count;
     }
 
+    /**
+     * Удаляет из таблицы строки, удовлетворяющие заданному условию.
+     * При наличии удаленных строк перестраивает индексы и обновляет файл на диске.
+     *
+     * @param table_name название таблицы
+     * @param cond       условие для отбора удаляемых строк (может быть null для очистки всей таблицы)
+     * @return количество удаленных записей
+     * @throws RuntimeException если таблица не найдена
+     */
     @Override
     public int delete(String table_name, Condition cond) {
         Table table = checkTableExists(table_name);
@@ -161,6 +229,14 @@ public class FileDbEngine implements DbEngine {
         return count;
     }
 
+    /**
+     * Создает B-Tree индекс в оперативной памяти для указанной колонки.
+     * Позволяет ускорить операции выборки, обновления и удаления с условием WHERE по данной колонке.
+     *
+     * @param table_name  название таблицы
+     * @param column_name название индексируемой колонки
+     * @throws RuntimeException если таблица или колонка не найдены
+     */
     @Override
     public void createIndex(String table_name, String column_name) {
         Table table = checkTableExists(table_name);
@@ -180,6 +256,15 @@ public class FileDbEngine implements DbEngine {
         table.indexes.put(column_name, index);
     }
 
+    /**
+     * Возвращает список строк таблицы, подходящих под условие фильтрации.
+     * Если по колонке из условия построен индекс и оператор поддерживается, выполняет быстрый поиск по дереву,
+     * иначе делегирует выполнение полному сканированию таблицы.
+     *
+     * @param table целевая таблица
+     * @param cond  условие фильтрации (может быть null)
+     * @return список отфильтрованных строк
+     */
     private List<Map<String, Object>> getRowsByCondition(Table table, Condition cond) {
         if (cond == null) {
             return new ArrayList<>(table.rows);
@@ -230,6 +315,12 @@ public class FileDbEngine implements DbEngine {
         return fullScan(table.rows, cond);
     }
 
+    /**
+     * Извлекает и объединяет списки индексов строк из поддерева.
+     *
+     * @param subMap срез дерева индекса
+     * @return плоский список номеров строк
+     */
     private List<Integer> getIdsFromSubMap(NavigableMap<Object, List<Integer>> subMap) {
         List<Integer> ids = new ArrayList<>();
         for (List<Integer> list : subMap.values()) {
@@ -238,6 +329,13 @@ public class FileDbEngine implements DbEngine {
         return ids;
     }
 
+    /**
+     * Выполняет последовательный перебор всех строк таблицы с проверкой условия.
+     *
+     * @param rows все строки таблицы
+     * @param cond условие отбора
+     * @return список строк, удовлетворяющих условию
+     */
     private List<Map<String, Object>> fullScan(List<Map<String, Object>> rows, Condition cond) {
         List<Map<String, Object>> result = new ArrayList<>();
         for (Map<String, Object> row : rows) {
@@ -249,6 +347,14 @@ public class FileDbEngine implements DbEngine {
         return result;
     }
 
+    /**
+     * Проверяет, удовлетворяет ли конкретное значение ячейки заданному условию.
+     * Корректно сравнивает числовые типы и прочие сравнимые объекты.
+     *
+     * @param rowVal значение из строки таблицы
+     * @param cond   условие с оператором и целевым значением
+     * @return true, если условие выполняется, иначе false
+     */
     private boolean evaluateCondition(Object rowVal, Condition cond) {
         if (rowVal == null || cond.val == null) return false;
 
@@ -284,12 +390,25 @@ public class FileDbEngine implements DbEngine {
         return false;
     }
 
+    /**
+     * Перестраивает все существующие индексы для указанной таблицы.
+     * Вызывается после операций модификации данных (insert, update, delete).
+     *
+     * @param table таблица, индексы которой необходимо обновить
+     */
     private void rebuildIndexes(Table table) {
         for (String colName : table.indexes.keySet()) {
             createIndex(table.name, colName);
         }
     }
 
+    /**
+     * Проверяет соответствие переданного объекта Java ожидаемому типу данных СУБД.
+     *
+     * @param value проверяемое значение (может быть null)
+     * @param type  целевой тип данных из схемы таблицы
+     * @return true, если тип значения допустим, иначе false
+     */
     private boolean isTypeMatching(Object value, DataType type) {
         if (value == null) return true;
         switch (type) {
@@ -302,6 +421,13 @@ public class FileDbEngine implements DbEngine {
         }
     }
 
+    /**
+     * Проверяет существование таблицы в памяти и возвращает её объект.
+     *
+     * @param table_name название проверяемой таблицы
+     * @return внутренний объект {@link Table}
+     * @throws RuntimeException если таблица не существует
+     */
     private Table checkTableExists(String table_name) {
         if (!tables.containsKey(table_name)) {
             throw new RuntimeException("Ошибка: Таблица '" + table_name + "' не найдена.");
@@ -309,6 +435,12 @@ public class FileDbEngine implements DbEngine {
         return tables.get(table_name);
     }
 
+    /**
+     * Сериализует и сохраняет схему таблицы (в файл .schema) и её строки (в файл .data) на жесткий диск.
+     *
+     * @param table таблица для сохранения
+     * @throws RuntimeException при возникновении ошибок ввода-вывода
+     */
     private void saveTableToDisk(Table table) {
         try {
             try (PrintWriter pw = new PrintWriter(DATA_DIR + "/" + table.name + ".schema")) {
@@ -332,6 +464,10 @@ public class FileDbEngine implements DbEngine {
         }
     }
 
+    /**
+     * Сканирует директорию данных при запуске СУБД, читает файлы схем и данных,
+     * восстанавливая структуру таблиц и их содержимое в оперативной памяти.
+     */
     private void loadAllTablesFromDisk() {
         File dir = new File(DATA_DIR);
         File[] schemaFiles = dir.listFiles((d, name) -> name.endsWith(".schema"));
@@ -381,6 +517,14 @@ public class FileDbEngine implements DbEngine {
         }
     }
 
+    /**
+     * Преобразует строковое представление значения, прочитанное из файла на диске,
+     * в соответствующий типизированный объект Java.
+     *
+     * @param val  строковое значение из файла .data
+     * @param type тип данных колонки согласно схеме
+     * @return типизированный объект (Integer, Double, Boolean или String)
+     */
     private Object parseValue(String val, DataType type) {
         switch (type) {
             case INT: return Integer.parseInt(val);
@@ -392,12 +536,22 @@ public class FileDbEngine implements DbEngine {
         }
     }
 
+    /**
+     * Внутренний класс-контейнер, представляющий структуру отдельной таблицы в памяти.
+     * Хранит имя, схему колонок, список записей и построенные индексы.
+     */
     private static class Table {
         String name;
         Map<String, DataType> schema;
         List<Map<String, Object>> rows;
         Map<String, TreeMap<Object, List<Integer>>> indexes;
 
+        /**
+         * Создает новый экземпляр таблицы в памяти.
+         *
+         * @param name   имя таблицы
+         * @param schema карта колонок и их типов данных
+         */
         Table(String name, Map<String, DataType> schema) {
             this.name = name;
             this.schema = new LinkedHashMap<>(schema);

@@ -3,8 +3,19 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Утилита для форматированного вывода результатов SQL-запросов в консоль.
+ * рассчитывает ширину колонок на основе длины данных и отрисовывает
+ * аккуратную таблицу.
+ */
 public class TablePrinter {
 
+    /**
+     * Выводит результат выполнения команды в стандартный поток вывода .
+     * Обрабатывает сообщения об ошибках, пустые результаты и успешно извлеченные данные.
+     *
+     * @param result объект ResultQ, содержащий статус операции, список колонок и строки данных
+     */
     public static void print(ResultQ result) {
         if (!result.isSuccess) {
             System.out.println(result.message);
@@ -43,6 +54,12 @@ public class TablePrinter {
         System.out.println("Строк: " + result.rows.size());
     }
 
+    /**
+     * Печатает строку-заголовок таблицы с названиями колонок.
+     *
+     * @param cols   список названий колонок
+     * @param widths карта с рассчитанной шириной для каждой колонки
+     */
     private static void printHeader(List<String> cols, Map<String, Integer> widths) {
         System.out.print("|");
         for (String col : cols) {
@@ -51,6 +68,14 @@ public class TablePrinter {
         System.out.println();
     }
 
+    /**
+     * Печатает одну строку данных таблицы.
+     * Значения {@code null} заменяются на строку "NULL".
+     *
+     * @param cols   список названий колонок
+     * @param row    карта значений текущей строки (имя колонки -> значение)
+     * @param widths карта с рассчитанной шириной для каждой колонки
+     */
     private static void printRow(List<String> cols, Map<String, Object> row, Map<String, Integer> widths) {
         System.out.print("|");
         for (String col : cols) {
@@ -60,6 +85,12 @@ public class TablePrinter {
         System.out.println();
     }
 
+    /**
+     * Печатает горизонтальную линию-разделитель таблицы (вида +---+---+).
+     *
+     * @param cols   список названий колонок
+     * @param widths карта с рассчитанной шириной для каждой колонки
+     */
     private static void printSeparator(List<String> cols, Map<String, Integer> widths) {
         System.out.print("+");
         for (String col : cols) {

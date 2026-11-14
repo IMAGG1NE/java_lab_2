@@ -9,6 +9,10 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Синтаксический анализатор SQL-запросов.
+ * Разбирает строковые команды с помощью регулярных выражений и преобразует их в объекты.
+ */
 public final class SqlParser {
 
     private static final int FLAGS = Pattern.CASE_INSENSITIVE | Pattern.DOTALL;
@@ -37,9 +41,19 @@ public final class SqlParser {
     private static final Pattern DOUBLE_LITERAL = Pattern.compile("[+-]?\\d+\\.\\d+");
     private static final Pattern IDENT = Pattern.compile("\\w+");
 
+    /**
+     * Приватный конструктор для предотвращения создания экземпляров утилитарного класса.
+     */
     private SqlParser() {
     }
 
+    /**
+     * Разбирает SQL-строку и возвращает готовую к выполнению команду.
+     * В случае ошибки синтаксиса возвращает {@link ErrorCommand}.
+     *
+     * @param sql строка с SQL-запросом
+     * @return объект команды
+     */
     public static Command parse(String sql) {
         try {
             return doParse(sql);
@@ -50,6 +64,13 @@ public final class SqlParser {
         }
     }
 
+    /**
+     * Внутренний метод разбора запроса и сопоставления с шаблонами команд.
+     *
+     * @param sql исходная строка запроса
+     * @return распознанная команда
+     * @throws SqlSyntaxException если запрос пуст или не соответствует ни одному шаблону
+     */
     private static Command doParse(String sql) {
         if (sql == null) {
             throw new SqlSyntaxException("пустой запрос");
@@ -76,6 +97,12 @@ public final class SqlParser {
         throw new SqlSyntaxException("неизвестная или некорректная команда: " + q);
     }
 
+    /**
+     * Разбирает команду CREATE TABLE и формирует схему колонок.
+     *
+     * @param m результат сопоставления с регулярным выражением
+     * @return команда создания таблицы
+     */
     private static Command parseCreateTable(Matcher m) {
         Map<String, DataType> columns = new LinkedHashMap<>();
         for (String def : splitTopLevel(m.group(2))) {
@@ -100,6 +127,12 @@ public final class SqlParser {
         return new CreateTableCommand(m.group(1), columns);
     }
 
+    /**
+     * Разбирает команду INSERT INTO, извлекая целевые колонки и вставляемые строки значений.
+     *
+     * @param m результат сопоставления с регулярным выражением
+     * @return команда вставки данных
+     */
     private static Command parseInsert(Matcher m) {
         List<String> cols = null;
         if (m.group(2) != null) {
@@ -126,6 +159,12 @@ public final class SqlParser {
         return new InsertCommand(m.group(1), cols, rows);
     }
 
+    /**
+     * Разбирает команду SELECT, включая список запрашиваемых колонок и условие WHERE.
+     *
+     * @param m результат сопоставления с регулярным выражением
+     * @return команда выборки данных
+     */
     private static Command parseSelect(Matcher m) {
         List<String> cols = new ArrayList<>();
         String raw = m.group(1).trim();
@@ -139,6 +178,12 @@ public final class SqlParser {
         return new SelectCommand(m.group(2), cols, parseWhere(m.group(3)));
     }
 
+    /**
+     * Разбирает команду UPDATE, формируя карту обновляемых значений и условие WHERE.
+     *
+     * @param m результат сопоставления с регулярным выражением
+     * @return команда обновления данных
+     */
     private static Command parseUpdate(Matcher m) {
         Map<String, Object> values = new LinkedHashMap<>();
         for (String part : splitTopLevel(m.group(2))) {
@@ -151,6 +196,12 @@ public final class SqlParser {
         return new UpdateCommand(m.group(1), values, parseWhere(m.group(3)));
     }
 
+    /**
+     * Разбирает строковое выражение секции WHERE в объект условия.
+     *
+     * @param where строка условия (может быть null)
+     * @return объект {@link Condition} или null, если условие не задано
+     */
     private static Condition parseWhere(String where) {
         if (where == null) {
             return null;
@@ -163,6 +214,12 @@ public final class SqlParser {
         return new Condition(m.group(1), op, parseLiteral(m.group(3)));
     }
 
+    /**
+     * Преобразует строковое название типа данных в элемент перечисления.
+     *
+     * @param name строковое название типа (например, "INT", "VARCHAR")
+     * @return соответствующий тип {@link DataType}
+     */
     private static DataType parseType(String name) {
         switch (name.toUpperCase()) {
             case "INT":
@@ -185,6 +242,12 @@ public final class SqlParser {
         }
     }
 
+    /**
+     * Преобразует строковый литерал из SQL-запроса в типизированный Java-объект.
+     *
+     * @param raw строковое представление значения
+     * @return объект String, Boolean, Integer, Double или null
+     */
     static Object parseLiteral(String raw) {
         String t = raw.trim();
         if (t.isEmpty()) {
@@ -205,6 +268,12 @@ public final class SqlParser {
         throw new SqlSyntaxException("не удалось распознать значение: " + t);
     }
 
+    /**
+     * Проверяет корректность имени идентификатора (таблицы или колонки).
+     *
+     * @param s проверяемая строка
+     * @return очищенное имя идентификатора
+     */
     private static String checkIdent(String s) {
         String t = s.trim();
         if (!IDENT.matcher(t).matches()) {
@@ -213,6 +282,12 @@ public final class SqlParser {
         return t;
     }
 
+    /**
+     * Разделяет строку по запятым на верхнем уровне, игнорируя запятые внутри скобок и кавычек.
+     *
+     * @param s исходная строка для разделения
+     * @return список разделенных элементов
+     */
     static List<String> splitTopLevel(String s) {
         List<String> parts = new ArrayList<>();
         StringBuilder cur = new StringBuilder();

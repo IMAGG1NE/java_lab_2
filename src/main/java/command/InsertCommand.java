@@ -6,17 +6,34 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Команда для вставки новых записей в таблицу.
+ * Поддерживает вставку как с явным указанием колонок, так и без него.
+ */
 public class InsertCommand extends AbstractCommand {
     private final String table;
-    private final List<String> columns; 
+    private final List<String> columns;
     private final List<List<Object>> rows;
 
+    /**
+     * Инициализирует команду вставки.
+     *
+     * @param table   имя таблицы
+     * @param columns список целевых колонок (может быть null, если переданы все значения)
+     * @param rows    список строк для вставки (каждая строка — это список значений)
+     */
     public InsertCommand(String table, List<String> columns, List<List<Object>> rows) {
         this.table = table;
         this.columns = columns;
         this.rows = rows;
     }
 
+    /**
+     * Выполняет вставку данных в таблицу.
+     *
+     * @param engine движок базы данных
+     * @return результат выполнения с количеством добавленных записей или сообщением об ошибке
+     */
     @Override
     protected ResultQ run(DbEngine engine) {
         List<String> cols = columns != null ? columns : engine.getColumnNames(table);
